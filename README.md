@@ -1,6 +1,6 @@
 # Attachment Management Service
 
-A secure and configurable .NET 8 microservice using Clean Architecture for managing file attachments via a RESTful API with API Key authentication and temporary signed URL support.
+A secure and configurable .NET 9 microservice using Clean Architecture for managing file attachments via a RESTful API with API Key authentication and temporary signed URL support.
 
 <!-- Optional: Add Badges (replace placeholders) -->
 <!-- [![Build Status](PLACEHOLDER_BUILD_BADGE_URL)](PLACEHOLDER_BUILD_URL) -->
