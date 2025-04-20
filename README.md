@@ -22,7 +22,7 @@ A secure and configurable .NET 9 microservice using Clean Architecture for manag
 
 ## Technology Stack
 
-*   **.NET 8**
+*   **.NET 9**
 *   **ASP.NET Core 8:** For the Web API framework.
 *   **Entity Framework Core 8:** For data access with PostgreSQL.
 *   **PostgreSQL:** Relational database for metadata storage.
