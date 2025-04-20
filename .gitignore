@@ -1,0 +1,6 @@
+.DS_Store
+ManagedFileService/bin
+ManagedFileService/obj
+ManagedFileService/Migrations
+.idea
+ManagedFileService.sln.DotSettings.user
