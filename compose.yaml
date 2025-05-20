@@ -1,77 +1,52 @@
-﻿# Omit top-level version for modern Docker Compose unless needed
+﻿# managedfileservice-compose.yml - Using shared database
+
+version: '3.8'
 
 services:
-# Volume initialization container
+  # Volume initialization container
   init-volume:
     image: busybox
     command: chmod -R 777 /app/uploads
     volumes:
       - upload_storage:/app/uploads
     restart: "no"
+    
   # Application Service
   managedfileservice:
-    container_name: managedfileservice-app # Optional: Give the container a specific name
-    image: managedfileservice # Image name from 'docker build -t managedfileservice ...'
+    container_name: managedfileservice-app
+    image: managedfileservice
     build:
-      context: . # Build context is the current directory
-      dockerfile: ManagedFileService/Dockerfile # Path to your Dockerfile relative to context
+      context: .
+      dockerfile: ManagedFileService/Dockerfile
     ports:
-      # Map host port 7100 to container port 8080 (default HTTP for .NET Core apps)
-      # Adjust '8080' if your app listens on a different port (e.g., 8081 for HTTPS)
       - "7100:8080"
     volumes:
-      # Mount the named volume 'upload_storage' to the path '/app/uploads' inside the container
-      # This directory will persist uploaded files.
       - upload_storage:/app/uploads
-      # DO NOT mount source code like './ManagedFileService:/app' unless for development hot-reload
     environment:
-      # Sets the environment for ASP.NET Core (e.g., influences appsettings.Production.json)
       - ASPNETCORE_ENVIRONMENT=Production
-      # Overrides ConnectionStrings:DefaultConnection from appsettings.json
-      # IMPORTANT: User/Password MUST match the 'db' service environment below
-      - ConnectionStrings__DefaultConnection=Server=db;Port=5432;Database=ManagedFileService;User Id=digital;Password=digital;Trust Server Certificate=True; # Added Port, Trust Server Certificate
-      # Overrides FileStorage:BasePath from appsettings.json
-      # Tells the app to save uploads to the path mapped by the 'upload_storage' volume
+      # Updated to point to the shared database service
+      - ConnectionStrings__DefaultConnection=Server=shared-postgres;Port=5432;Database=ManagedFileService;User Id=digital;Password=digital;Trust Server Certificate=True;
       - FileStorage__BasePath=/app/uploads
-      # Instruct ASP.NET Core which URLs to listen on inside the container
-      - ASPNETCORE_URLS=http://+:8080 # Listen on port 8080 internally (match ports section)
-      # Add SignedUrlSettings if not managed elsewhere (using User Secrets requires different handling in Docker)
-      - SignedUrlSettings__SecretKey=${SIGNED_URL_SECRET_KEY:-DefaultDevSecretKeyWhichIsNotSecureAtAllAndNeedsReplacing} # Example using environment variable substitution or default
+      - ASPNETCORE_URLS=http://+:8080
+      - SignedUrlSettings__SecretKey=${SIGNED_URL_SECRET_KEY:-DefaultDevSecretKeyWhichIsNotSecureAtAllAndNeedsReplacing}
       - SignedUrlSettings__MaxExpiryMinutes=10080
     depends_on:
-      db: # Ensures 'db' service starts before this service
-        condition: service_healthy # Recommended: Wait for DB to be healthy (see healthcheck below)
       init-volume:
         condition: service_completed_successfully
-    restart: unless-stopped # Policy for restarting the container
-
-  # PostgreSQL Database Service
-  db:
-    container_name: managedfileservice-db # Optional: Give the container a specific name
-    image: postgres:16 # Use a specific major version instead of 'latest'
-    environment:
-      # Credentials MUST match the connection string in 'managedfileservice'
-      POSTGRES_USER: digital
-      POSTGRES_PASSWORD: digital
-      POSTGRES_DB: ManagedFileService # Specifies the database name to be created
-    ports:
-      # Exposes the DB port to the host - useful for debugging with a local DB client
-      # Not strictly required for app-to-db communication within Docker network
-      - "5431:5432" # Map host port 5431 to container port 5432 (PostgreSQL default)
-    volumes:
-      # Mount the named volume 'postgres_data' to persist database files
-      # Correct internal path is '/var/lib/postgresql/data'
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck: # Recommended: Check if the database is ready to accept connections
-      test: ["CMD-SHELL", "pg_isready -U digital -d ManagedFileService"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped # Policy for restarting the container
+    restart: unless-stopped
+    networks:
+      - default
+      - shared-db-network
 
 # Named Volumes Definition
 volumes:
-  postgres_data: # Volume for persisting PostgreSQL database data
+  upload_storage:
     driver: local
-  upload_storage: # Volume for persisting uploaded files from the application
-    driver: local
+
+# Use the shared network to connect to the database
+networks:
+  default:
+    driver: bridge
+  shared-db-network:
+    external: true
+    name: shared-db-network
