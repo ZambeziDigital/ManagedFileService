@@ -64,4 +64,40 @@ public class LocalFileStorageService : IFileStorageService
         // Consider what to do if file not found (log? ignore?)
         return Task.CompletedTask;
     }
+
+    public Task<bool> CheckHealthAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Check if base directory exists and is accessible
+            if (!Directory.Exists(_basePath))
+            {
+                try
+                {
+                    // Attempt to create it if it doesn't exist
+                    Directory.CreateDirectory(_basePath);
+                }
+                catch
+                {
+                    return Task.FromResult(false);
+                }
+            }
+            
+            // Try to write a temporary file to verify write permissions
+            var testFilePath = Path.Combine(_basePath, $"health_check_{Guid.NewGuid()}.tmp");
+            File.WriteAllText(testFilePath, "Health check");
+            
+            // Clean up the test file
+            if (File.Exists(testFilePath))
+            {
+                File.Delete(testFilePath);
+            }
+            
+            return Task.FromResult(true);
+        }
+        catch
+        {
+            return Task.FromResult(false);
+        }
+    }
 }

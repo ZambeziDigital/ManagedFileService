@@ -3,7 +3,6 @@ using System.Text;
 using ManagedFileService.Application.Interfaces;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.IdentityModel.Tokens;
 
 namespace ManagedFileService.Infrastructure.Services;

@@ -1,5 +1,6 @@
 global using ManagedFileService.Application.Common.Exceptions;
 using Microsoft.EntityFrameworkCore;
+using ManagedFileService.Domain.Interfaces;
 
 namespace ManagedFileService.Application.Features.Attachments.Commands.CreateAllowedApplication;
 
@@ -18,50 +19,73 @@ public class CreateAllowedApplicationCommandHandler : IRequestHandler<CreateAllo
 
     public async Task<Guid> Handle(CreateAllowedApplicationCommand request, CancellationToken cancellationToken)
     {
-        // Basic Validation
+        // 1. Basic input validation
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             throw new ValidationException("Application name cannot be empty.");
         }
-        if (string.IsNullOrWhiteSpace(request.PlainTextApiKey))
+
+        if (string.IsNullOrWhiteSpace(request.ApiKey))
         {
             throw new ValidationException("API Key cannot be empty.");
         }
-        // Add other validation as needed (e.g., name uniqueness check if required)
-        // var existing = await _allowedAppRepository.FindByNameAsync(request.Name, cancellationToken);
-        // if (existing != null) throw new ValidationException($"Application with name '{request.Name}' already exists.");
+        
+        if (request.ApiKey.Length < 16) // Minimum recommended length for a decent API key
+        {
+            throw new ValidationException("API Key must be at least 16 characters long for security.");
+        }
 
-        _logger.LogInformation("Attempting to create new AllowedApplication: {AppName}", request.Name);
+        // 2. Convert MB to bytes if MaxFileSizeMegaBytes is provided
+        long? maxFileSizeBytes = null;
+        if (request.MaxFileSizeMegaBytes.HasValue)
+        {
+            // Quick validation
+            if (request.MaxFileSizeMegaBytes.Value <= 0)
+            {
+                throw new ValidationException("Max file size must be positive.");
+            }
+            
+            // Convert MB to bytes (1 MB = 1,048,576 bytes)
+            maxFileSizeBytes = request.MaxFileSizeMegaBytes.Value * 1_048_576;
+        }
 
-        // **Securely hash the API Key using BCrypt**
+        // 3. Generate a secure hash of the API Key
         string apiKeyHash;
         try
         {
-             // The work factor determines computational cost (higher is slower but more secure)
-            apiKeyHash = BCrypt.Net.BCrypt.HashPassword(request.PlainTextApiKey);
-             _logger.LogDebug("Generated API Key Hash for {AppName}", request.Name);
+            // BCrypt.Net.BCrypt automatically handles salt generation and inclusion in the hash string
+            apiKeyHash = BCrypt.Net.BCrypt.HashPassword(request.ApiKey);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to hash API Key for application {AppName}", request.Name);
-            throw new InfrastructureException("Failed to secure API Key during application creation.", ex);
+            _logger.LogError(ex, "Failed to hash API key during application creation.");
+            throw new InfrastructureException("Error occurred while processing security credentials.", ex);
         }
 
-
-        // Create the domain entity
+        // 4. Create entity with the hash (NOT the plain text key)
         var newApplication = new AllowedApplication(
             name: request.Name,
             apiKeyHash: apiKeyHash, // Pass the HASH, not the plain text
-            maxFileSizeMegaBytes: request.MaxFileSizeMegaBytes
-        );
+            maxFileSizeBytes: maxFileSizeBytes, // FIX: Use the converted value instead of original
+            isAdmin: request.IsAdmin);
 
-        // Persist using the repository
-        // Note: Assumes IAllowedApplicationRepository has an AddAsync method
+        // 5. Save to repository
         try
         {
-            // You need to add AddAsync to IAllowedApplicationRepository and implement it
             await _allowedAppRepository.AddAsync(newApplication, cancellationToken);
             _logger.LogInformation("Successfully created AllowedApplication {AppName} with ID {AppId}", newApplication.Name, newApplication.Id);
+            
+            // Add a very clear log message that explains what to use as the API key
+            _logger.LogWarning(
+                "IMPORTANT: For application {AppName} ({AppId}), you must use the ORIGINAL API KEY '{ApiKeyHint}...' for authentication, NOT the Application ID!", 
+                newApplication.Name, 
+                newApplication.Id, 
+                request.ApiKey.Substring(0, Math.Min(4, request.ApiKey.Length)));
+                
+            if (newApplication.IsAdmin)
+            {
+                _logger.LogWarning("Created application with ADMIN privileges: {AppName} ({AppId})", newApplication.Name, newApplication.Id);
+            }
         }
         catch(DbUpdateException dbEx) // Catch potential DB constraint violations (e.g., unique index on Name if you add one)
         {
@@ -75,6 +99,7 @@ public class CreateAllowedApplicationCommandHandler : IRequestHandler<CreateAllo
             throw; // Re-throw other unexpected errors
         }
 
+        // 6. Return the new ID (consumer will need to remember the plain text key!)
         return newApplication.Id;
     }
 }

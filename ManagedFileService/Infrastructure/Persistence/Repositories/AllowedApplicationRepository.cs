@@ -38,68 +38,67 @@ public class AllowedApplicationRepository : IAllowedApplicationRepository
     {
         if (string.IsNullOrWhiteSpace(apiKey))
         {
+            _logger.LogWarning("Empty API key provided to FindByApiKeyAsync");
             return null; // Cannot match an empty key
         }
 
-        // --- !! PERFORMANCE WARNING !! ---
-        // This loads ALL applications (or at least their hashes) into memory for verification.
-        // This is OK for a small number of applications but DOES NOT SCALE well.
-        // Alternatives:
-        // 1. Require an App Identifier (like Name or ID) alongside the API key in the request header.
-        //    Then retrieve only that specific app by identifier and verify its key hash.
-        // 2. Use a different Authentication scheme designed for scale (JWT, OAuth).
-        // 3. Implement key storage optimized for lookup (less common with salted hashes).
-
-        // Let's proceed with the iteration method as per the interface, with the above warning.
+        // Load applications
         var allApplications = await _context.AllowedApplications
             .AsNoTracking() // Read-only operation, no need to track changes
             .ToListAsync(cancellationToken); // Load necessary data
 
         _logger.LogDebug("Attempting to validate API key against {AppCount} registered applications.", allApplications.Count);
+        
+        if (allApplications.Count == 0)
+        {
+            _logger.LogWarning("No applications found in database during API key validation");
+        }
 
         foreach (var app in allApplications)
         {
             if (string.IsNullOrEmpty(app.ApiKeyHash))
             {
-                // Skip apps with no hash configured (log potentially?)
-                 _logger.LogWarning("Application {AppName} ({AppId}) has no API key hash configured.", app.Name, app.Id);
+                _logger.LogWarning("Application {AppName} ({AppId}) has no API key hash configured.", app.Name, app.Id);
                 continue;
             }
 
+            _logger.LogDebug("Checking key against application: {AppName} ({AppId})", app.Name, app.Id);
+            
             try
             {
+                // Log hash format information (without revealing the actual hash)
+                _logger.LogDebug("Hash format check for {AppName}: Length={HashLength}, StartsWithBCrypt={StartsWithBCrypt}",
+                    app.Name, 
+                    app.ApiKeyHash.Length,
+                    app.ApiKeyHash.StartsWith("$2a$") || app.ApiKeyHash.StartsWith("$2b$") || app.ApiKeyHash.StartsWith("$2y$"));
+                
                 // Securely verify the provided plain-text key against the stored BCrypt hash
                 bool isValid = BCrypt.Net.BCrypt.Verify(apiKey, app.ApiKeyHash);
 
+                _logger.LogDebug("Verification result for {AppName}: {Result}", app.Name, isValid ? "Match" : "No match");
+                
                 if (isValid)
                 {
                     _logger.LogInformation("API key validated successfully for Application: {AppName} ({AppId})", app.Name, app.Id);
-                    // Re-fetch the entity *with tracking* if needed downstream,
-                    // or return the non-tracked one if only reading data.
-                    // Let's return the non-tracked one found during iteration for efficiency.
-                    // If the handler needed to *update* this application entity later
-                    // in the same request, it would need re-attaching or fetching with tracking.
                     return app;
                 }
             }
             catch (BCrypt.Net.SaltParseException ex)
             {
                 // This usually means the stored hash is not a valid BCrypt hash
-                _logger.LogError(ex, "Invalid BCrypt hash format encountered for Application {AppName} ({AppId}). Stored Hash: {StoredHash}",
-                    app.Name, app.Id, app.ApiKeyHash);
-                // Decide how to handle - skip, fail request? Let's skip for now.
+                _logger.LogError(ex, "Invalid BCrypt hash format encountered for Application {AppName} ({AppId}). Hash starts with: {HashStart}",
+                    app.Name, app.Id, app.ApiKeyHash.Substring(0, Math.Min(10, app.ApiKeyHash.Length)));
                 continue;
             }
-            catch (Exception ex) // Catch broader exceptions during verification
+            catch (Exception ex)
             {
-                 _logger.LogError(ex, "Unexpected error during API key verification for Application {AppName} ({AppId}).", app.Name, app.Id);
-                // Decide whether to continue checking others or rethrow
+                _logger.LogError(ex, "Unexpected error during API key verification for Application {AppName} ({AppId}).", app.Name, app.Id);
                 continue;
             }
         }
 
         // If no application's key matched after checking all
-        _logger.LogWarning("Provided API key did not match any registered application.");
+        _logger.LogWarning("Provided API key did not match any registered applications.");
         return null;
     }
 
@@ -128,5 +127,43 @@ public class AllowedApplicationRepository : IAllowedApplicationRepository
         // Consider Unit of Work pattern - saving might happen higher up
         await _context.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Added AllowedApplication to DB: {AppName} ({AppId})", application.Name, application.Id);
+    }
+    
+    public async Task<IReadOnlyList<AllowedApplication>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        return await _context.AllowedApplications
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+    }
+    
+    public async Task UpdateAsync(AllowedApplication application, CancellationToken cancellationToken = default)
+    {
+        if (application == null) throw new ArgumentNullException(nameof(application));
+        
+        _context.Entry(application).State = EntityState.Modified;
+        await _context.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Updated AllowedApplication: {AppName} ({AppId})", application.Name, application.Id);
+    }
+    
+    public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var application = await _context.AllowedApplications.FindAsync(new object[] { id }, cancellationToken);
+        if (application == null)
+        {
+            _logger.LogWarning("Attempted to delete non-existent AllowedApplication with ID: {AppId}", id);
+            return;
+        }
+        
+        _context.AllowedApplications.Remove(application);
+        await _context.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Deleted AllowedApplication: {AppName} ({AppId})", application.Name, application.Id);
+    }
+    
+    public async Task<IReadOnlyList<AllowedApplication>> GetAdminApplicationsAsync(CancellationToken cancellationToken = default)
+    {
+        return await _context.AllowedApplications
+            .AsNoTracking()
+            .Where(a => a.IsAdmin)
+            .ToListAsync(cancellationToken);
     }
 }

@@ -10,6 +10,7 @@ public class AppDbContext : DbContext
 {
     public DbSet<Attachment> Attachments { get; set; }
     public DbSet<AllowedApplication> AllowedApplications { get; set; }
+    public DbSet<ApplicationAccount> ApplicationAccounts { get; set; }
 
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
@@ -35,6 +36,36 @@ public class AppDbContext : DbContext
             // Index on ApplicationId if querying by app is common
             entity.HasIndex(e => e.ApplicationId);
         });
+
+        modelBuilder.Entity<ApplicationAccount>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.ExternalId).HasMaxLength(100);
+            
+            // Reference to parent application
+            entity.HasOne(e => e.Application)
+                .WithMany()
+                .HasForeignKey(e => e.ApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            // Index on ApplicationId for efficient lookups
+            entity.HasIndex(e => e.ApplicationId);
+            
+            // Index on external ID for lookups
+            entity.HasIndex(e => e.ExternalId);
+        });
+
+        // modelBuilder.Entity<AllowedApplication>().HasData(
+        //    
+        //         new AllowedApplication
+        //         (
+        //             "AdminApp",
+        //             "AdminApp",
+        //             true,
+        //         )
+        //     );
 
 
         base.OnModelCreating(modelBuilder);

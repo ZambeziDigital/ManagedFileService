@@ -8,6 +8,10 @@ using ManagedFileService.Infrastructure.Services;
 using ManagedFileService.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
+using ManagedFileService.Infrastructure.HealthChecks; // Add this using
+using HealthChecks.UI.Client; // Add this for UIResponseWriter if you want a detailed UI
+using Microsoft.AspNetCore.Diagnostics.HealthChecks; // Add this for HealthCheckOptions
+
 var builder = WebApplication.CreateBuilder(args);
 
 // --- Configuration ---
@@ -29,17 +33,49 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddScoped<IAttachmentRepository, AttachmentRepository>();
 builder.Services.AddScoped<IAllowedApplicationRepository, AllowedApplicationRepository>();
+builder.Services.AddScoped<IApplicationAccountRepository, ApplicationAccountRepository>();
 builder.Services.Configure<SignedUrlSettings>(builder.Configuration.GetSection("SignedUrlSettings"));
-// File Storage (Local example)
-builder.Services.Configure<FileStorageOptions>(builder.Configuration.GetSection("FileStorage"));
-builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>(); // Singleton might be okay for local
+builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>(); // Ensure IFileStorageService is registered
+// Add ZIP archive service
+builder.Services.AddScoped<IZipArchiveService, ZipArchiveService>();
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("Database") // Checks database connectivity
+    .AddCheck<FileStorageHealthCheck>("FileStorage"); // Custom check for file storage
+
+// File Storage Configuration
+var storageProvider = builder.Configuration.GetValue<string>("FileStorage");
+// if (storageProvider == "AzureBlob")
+// {
+//     builder.Services.Configure<AzureBlobStorageOptions>(builder.Configuration.GetSection("FileStorage:Azure"));
+//     builder.Services.AddSingleton<IFileStorageService, AzureBlobStorageService>();
+// }
+// else if (storageProvider == "AwsS3")
+// {
+//     builder.Services.Configure<AwsS3Options>(builder.Configuration.GetSection("FileStorage:AwsS3"));
+//     builder.Services.AddSingleton<IFileStorageService, AwsS3StorageService>();
+// }
+// else // Default to local storage
+{
+    builder.Services.Configure<FileStorageOptions>(builder.Configuration.GetSection("FileStorage"));
+    builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+}
 // --- Service Registration ---
 builder.Services.AddSingleton<ISignedUrlService, SignedUrlService>(); // Singleton is suitable if state relies only on config
 
 // Current Request Service
 builder.Services.AddHttpContextAccessor(); // Required for HttpContext access
 builder.Services.AddScoped<ICurrentRequestService, CurrentRequestService>();
-
+// add CORS policy for Wasm client
+builder.Services.AddCors(
+    options => options.AddPolicy(
+        "wasm",
+        policy => policy.AllowAnyOrigin()
+            .AllowAnyMethod()
+            .SetIsOriginAllowed(pol => true)
+            .AllowAnyHeader()
+            // .AllowCredentials()
+        ));
 
 // API Layer Services
 builder.Services.AddControllers();
@@ -90,11 +126,13 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    // await dbContext.Database.EnsureCreatedAsync(); // Or use MigrateAsync
     await dbContext.Database.MigrateAsync();
 
-    // Seed initial data if needed (e.g., a default application for testing)
-    // await SeedData.InitializeAsync(scope.ServiceProvider);
+    // Seed initial data if needed
+    if (app.Environment.IsDevelopment())
+    {
+        await SeedData.InitializeAsync(app.Services);
+    }
 }
 
 
@@ -112,16 +150,21 @@ else
 }
 
 // app.UseHttpsRedirection();
-// Note: No app.UseAuthentication() or app.UseAuthorization() needed if ONLY using the API key middleware
-// If you mix authentication schemes, you'd need them.
-
-app.MapControllers();
-app.UseRouting();
+app.UseRouting(); // UseRouting should come BEFORE middleware that depends on route information
 
 // --- Custom API Key Middleware ---
-app.UseMiddleware<ApiKeyAuthMiddleware>(); // Add custom middleware BEFORE Authorization/Controllers
+app.UseMiddleware<ApiKeyAuthMiddleware>(); // Add custom middleware AFTER UseRouting
 
+app.UseCors("wasm");
+// app.UseAuthorization(); // Uncomment if needed
+app.MapControllers();
 
+// It will return a 200 status if all checks are healthy, otherwise 503.
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    Predicate = _ => true, // Include all checks
+    ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse // Provides a detailed JSON response
+});
 
 app.Run();
 

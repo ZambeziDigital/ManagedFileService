@@ -36,11 +36,25 @@ public class UploadAttachmentCommandHandler : IRequestHandler<UploadAttachmentCo
 
         // --- Validation ---
         // Size Validation
-        long fileSizeLimitBytes = (application.MaxFileSizeMegaBytes ?? long.MaxValue) * 1024 * 1024;
+        long fileSizeLimitBytes = application.MaxFileSizeBytes ?? long.MaxValue;
         if (request.File.Length > fileSizeLimitBytes)
         {
-            throw new ArgumentException($"File size exceeds the allowed limit of {application.MaxFileSizeMegaBytes} MB for this application.");
+            throw new ArgumentException($"File size exceeds the allowed limit of {application.MaxFileSizeBytes / (1024 * 1024)} MB for this application.");
             // Consider a custom ValidationException
+        }
+
+        // Storage Limit Validation
+        if (application.MaxStorageBytes.HasValue)
+        {
+            // Get current usage
+            var currentUsage = await _attachmentRepository.GetStorageBytesForApplicationAsync(applicationId, cancellationToken);
+            
+            // Check if the new file would exceed the limit
+            if (currentUsage + request.File.Length > application.MaxStorageBytes.Value)
+            {
+                throw new ArgumentException($"This upload would exceed your storage limit of {application.MaxStorageBytes / (1024 * 1024)} MB. " +
+                                           $"Current usage: {currentUsage / (1024 * 1024)} MB.");
+            }
         }
         // Potential Content-Type Validation based on app config could go here
 

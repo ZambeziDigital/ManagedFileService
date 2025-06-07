@@ -78,7 +78,7 @@ public class DeleteAttachmentCommandHandler : IRequestHandler<DeleteAttachmentCo
         // 4. Delete Metadata from Database
         try
         {
-            await _attachmentRepository.DeleteAsync(attachment, cancellationToken);
+            await _attachmentRepository.DeleteAsync(attachment.Id, cancellationToken);
             _logger.LogInformation("Successfully deleted attachment metadata from DB: {AttachmentId}", attachment.Id);
         }
         catch (Exception ex)

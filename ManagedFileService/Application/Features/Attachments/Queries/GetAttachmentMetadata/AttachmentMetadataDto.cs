@@ -6,4 +6,7 @@ public record AttachmentMetadataDto(
     string ContentType,
     long SizeBytes,
     DateTime UploadedAtUtc,
-    string? UserId);
+    string? UserId)
+{
+
+}
