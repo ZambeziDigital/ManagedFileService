@@ -79,7 +79,7 @@ public class AdminController : ControllerBase
         }
 
         var applications = await _applicationRepository.GetAllAsync(cancellationToken);
-        
+
         var applicationDtos = applications.Select(app => new ApplicationDto
         {
             Id = app.Id,
@@ -90,7 +90,7 @@ public class AdminController : ControllerBase
 
         return Ok(applicationDtos);
     }
-    
+
     [HttpGet("applications/{id}")]
     [ProducesResponseType(typeof(ApplicationDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -102,7 +102,7 @@ public class AdminController : ControllerBase
         {
             return Forbid("Admin access required");
         }
-        
+
         var application = await _applicationRepository.GetByIdAsync(id, cancellationToken);
         if (application == null)
         {
@@ -112,9 +112,9 @@ public class AdminController : ControllerBase
         // Get storage usage for this application
         var storageByApp = await _attachmentRepository.GetStorageByApplicationAsync(cancellationToken);
         var storageUsed = storageByApp.TryGetValue(id, out var size) ? size : 0;
-        
+
         var attachments = await _attachmentRepository.GetByApplicationIdAsync(id, 1, 20, cancellationToken);
-        
+
         var applicationDto = new ApplicationDetailDto
         {
             Id = application.Id,
@@ -135,7 +135,7 @@ public class AdminController : ControllerBase
 
         return Ok(applicationDto);
     }
-    
+
     [HttpPost("applications")]
     [ProducesResponseType(typeof(Guid), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -147,7 +147,7 @@ public class AdminController : ControllerBase
         {
             return Forbid("Admin access required");
         }
-        
+
         try
         {
             var command = new CreateAllowedApplicationCommand(
@@ -155,9 +155,9 @@ public class AdminController : ControllerBase
                 request.ApiKey,
                 request.MaxFileSizeMegaBytes,
                 request.IsAdmin);
-                
+
             var newAppId = await _mediator.Send(command, cancellationToken);
-            
+
             return CreatedAtAction(nameof(GetApplicationById), new { id = newAppId }, newAppId);
         }
         catch (ValidationException ex)
@@ -170,7 +170,7 @@ public class AdminController : ControllerBase
             return StatusCode(500, new { Message = "An error occurred while creating the application" });
         }
     }
-    
+
     [HttpDelete("applications/{id}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -182,33 +182,33 @@ public class AdminController : ControllerBase
         {
             return Forbid("Admin access required");
         }
-        
+
         var application = await _applicationRepository.GetByIdAsync(id, cancellationToken);
         if (application == null)
         {
             return NotFound();
         }
-        
+
         // Get all attachments for this application to delete them too
         var attachments = await _attachmentRepository.GetByApplicationIdAsync(id, 1, int.MaxValue, cancellationToken);
-        
+
         // Delete all attachments first
         foreach (var attachment in attachments)
         {
             await _attachmentRepository.DeleteAsync(attachment.Id, cancellationToken);
         }
-        
+
         // Delete the application
         await _applicationRepository.DeleteAsync(id, cancellationToken);
-        
+
         return NoContent();
     }
-    
+
     [HttpGet("attachments")]
     [ProducesResponseType(typeof(PaginatedList<AttachmentMetadataDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetAllAttachments(
-        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
@@ -217,18 +217,18 @@ public class AdminController : ControllerBase
         {
             return Forbid("Admin access required");
         }
-        
+
         // Validate pagination parameters
         if (pageNumber < 1) pageNumber = 1;
         if (pageSize < 1 || pageSize > 100) pageSize = 20;
-        
+
         var totalCount = await _attachmentRepository.GetTotalCountAsync(cancellationToken);
         var attachments = await _attachmentRepository.GetAllAsync(pageNumber, pageSize, cancellationToken);
-        
+
         // Get all applications to map names
         var applications = await _applicationRepository.GetAllAsync(cancellationToken);
         var appDict = applications.ToDictionary(a => a.Id, a => a.Name);
-        
+
         var attachmentDtos = attachments.Select(att => new AttachmentListItemDto
         {
             Id = att.Id,
@@ -240,7 +240,7 @@ public class AdminController : ControllerBase
             ApplicationId = att.ApplicationId,
             ApplicationName = appDict.TryGetValue(att.ApplicationId, out var name) ? name : "Unknown"
         }).ToList();
-        
+
         var result = new PaginatedList<AttachmentListItemDto>
         {
             Items = attachmentDtos,
@@ -249,10 +249,10 @@ public class AdminController : ControllerBase
             TotalCount = totalCount,
             TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
         };
-        
+
         return Ok(result);
     }
-    
+
     [HttpGet("storage/summary")]
     [ProducesResponseType(typeof(StorageSummaryDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -263,11 +263,11 @@ public class AdminController : ControllerBase
         {
             return Forbid("Admin access required");
         }
-        
+
         var totalStorageBytes = await _attachmentRepository.GetTotalStorageBytesAsync(cancellationToken);
         var storageByApp = await _attachmentRepository.GetStorageByApplicationAsync(cancellationToken);
         var applications = await _applicationRepository.GetAllAsync(cancellationToken);
-        
+
         var appStorage = applications.Select(app => new ApplicationStorageDto
         {
             ApplicationId = app.Id,
@@ -275,20 +275,105 @@ public class AdminController : ControllerBase
             StorageBytes = storageByApp.TryGetValue(app.Id, out var size) ? size : 0,
             StorageMegabytes = storageByApp.TryGetValue(app.Id, out size) ? Math.Round(size / 1048576.0, 2) : 0
         }).OrderByDescending(a => a.StorageBytes).ToList();
-        
+
         var summary = new StorageSummaryDto
         {
             TotalStorageBytes = totalStorageBytes,
             TotalStorageMegabytes = Math.Round(totalStorageBytes / 1048576.0, 2),
             ApplicationStorage = appStorage
         };
-        
+
         return Ok(summary);
     }
-    
+
     // Helper method to check if the current user is an admin
     private bool IsAdmin()
     {
         return User.HasClaim(ClaimTypes.Role, "Admin");
     }
+
+
+    // ...existing code...
+
+    [HttpPost("applications/{id}/reset-api-key")]
+    [ProducesResponseType(typeof(ApiKeyResetResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ResetApiKey(Guid id, CancellationToken cancellationToken)
+    {
+        // Check if caller is admin
+        if (!IsAdmin())
+        {
+            return Forbid("Admin access required");
+        }
+
+        try
+        {
+            // Get the target application
+            var targetApp = await _applicationRepository.GetByIdAsync(id, cancellationToken);
+            if (targetApp == null)
+            {
+                return NotFound($"Application with ID {id} not found");
+            }
+
+            // Get current application from context to prevent self-reset
+            var currentAppId = HttpContext.Items["AllowedApplication"] as AllowedApplication;
+            if (currentAppId?.Id == targetApp.Id)
+            {
+                return BadRequest("Cannot reset your own API key through this endpoint for security reasons");
+            }
+
+            // Generate new API key
+            var newApiKey = GenerateSecureApiKey();
+            var newApiKeyHash = BCrypt.Net.BCrypt.HashPassword(newApiKey);
+
+            // Update the application
+            targetApp.SetApiKeyHash(newApiKeyHash);
+            await _applicationRepository.UpdateAsync(targetApp, cancellationToken);
+
+            _logger.LogInformation("API key reset for application {ApplicationName} ({ApplicationId}) by admin",
+                targetApp.Name, targetApp.Id);
+
+            return Ok(new ApiKeyResetResponse
+            {
+                ApplicationId = targetApp.Id,
+                ApplicationName = targetApp.Name,
+                NewApiKey = newApiKey,
+                Message = "API key has been successfully reset. Please store this key securely as it cannot be retrieved again."
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resetting API key for application {ApplicationId}", id);
+            return StatusCode(500, new { Message = "An error occurred while resetting the API key" });
+        }
+    }
+
+    private static string GenerateSecureApiKey()
+    {
+        // Generate a cryptographically secure API key (32 characters)
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        using var random = System.Security.Cryptography.RandomNumberGenerator.Create();
+        var bytes = new byte[32];
+        random.GetBytes(bytes);
+
+        var result = new char[32];
+        for (int i = 0; i < 32; i++)
+        {
+            result[i] = chars[bytes[i] % chars.Length];
+        }
+
+        return new string(result);
+    }
+
+    // ...existing code...
+    
+    public class ApiKeyResetResponse
+{
+    public Guid ApplicationId { get; set; }
+    public string ApplicationName { get; set; } = string.Empty;
+    public string NewApiKey { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+}
 }
