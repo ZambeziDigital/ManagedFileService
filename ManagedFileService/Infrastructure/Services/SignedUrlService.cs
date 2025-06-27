@@ -34,6 +34,7 @@ public class SignedUrlService : ISignedUrlService
 
     public SignedUrlResult GenerateSignedUrl(Guid attachmentId, int expiresInMinutes, string basePublicUrl) // <-- Change return type
     {
+        expiresInMinutes = _maxExpiryMinutes ?? 525949; //TODO: Default to 1 year if not configured
         if (expiresInMinutes <= 0)
         {
             throw new ArgumentException("Expiration minutes must be positive.", nameof(expiresInMinutes));
